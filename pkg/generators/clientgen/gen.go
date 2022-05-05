@@ -40,8 +40,9 @@ import (
 
 var (
 	// RuleDefinition is a marker for defining rules
-	ruleDefinition  = markers.Must(markers.MakeDefinition("genclient", markers.DescribesType, placeholder{}))
-	namespaceMarker = markers.Must(markers.MakeDefinition("genclient:nonNamespaced", markers.DescribesType, placeholder{}))
+	ruleDefinition          = markers.Must(markers.MakeDefinition("genclient", markers.DescribesType, placeholder{}))
+	namespaceMarker         = markers.Must(markers.MakeDefinition("genclient:nonNamespaced", markers.DescribesType, placeholder{}))
+	statusSubresourceMarker = markers.Must(markers.MakeDefinition("kubebuilder:subresource:status", markers.DescribesType, placeholder{}))
 )
 
 const (
@@ -61,7 +62,8 @@ type placeholder struct{}
 
 type Generator struct {
 	// InputDir is the path where types are defined.
-	inputDir string
+	inputDir    string
+	basePackage string
 	// Output Dir where the wrappers are to be written.
 	outputDir string
 	// Path to where generated clientsets are found.
@@ -79,7 +81,12 @@ type Generator struct {
 
 func (g Generator) RegisterMarker() (*markers.Registry, error) {
 	reg := &markers.Registry{}
-	if err := markers.RegisterAll(reg, ruleDefinition, namespaceMarker); err != nil {
+	if err := markers.RegisterAll(
+		reg,
+		ruleDefinition,
+		namespaceMarker,
+		statusSubresourceMarker,
+	); err != nil {
 		return nil, fmt.Errorf("error registering markers")
 	}
 	return reg, nil
@@ -137,6 +144,11 @@ func validateFlags(f flag.Flags) error {
 func (g *Generator) setDefaults(f flag.Flags) (err error) {
 	if f.InputDir != "" {
 		g.inputDir = f.InputDir
+		pkg := util.CurrentPackage(f.InputDir)
+		if len(pkg) == 0 {
+			return fmt.Errorf("error finding the module path for this package %q", f.InputDir)
+		}
+		g.basePackage = pkg
 	}
 	if f.OutputDir != "" {
 		g.outputDir = f.OutputDir
@@ -213,16 +225,7 @@ func (g *Generator) writeWrappedClientSet() error {
 		return err
 	}
 
-	pwd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("error finding current directory %q", err)
-	}
-	pkg := util.CurrentPackage(pwd)
-	if len(pkg) == 0 {
-		return fmt.Errorf("error finding the module path for this package %q", pwd)
-	}
-
-	wrappedInf, err := internal.NewInterfaceWrapper(g.clientSetAPIPath, g.clientsetName, pkg, g.outputDir, g.groupVersions, &out)
+	wrappedInf, err := internal.NewInterfaceWrapper(g.clientSetAPIPath, g.clientsetName, g.basePackage, g.outputDir, g.groupVersions, &out)
 	if err != nil {
 		return err
 	}
@@ -285,9 +288,9 @@ func (g *Generator) generateSubInterfaces(ctx *genall.GenerationContext) error {
 		// Even if there are multiple versions for same group, we will have separate types.GroupVersions
 		// for it. Hence length of gv.Versions will always be one.
 		version := gv.Versions[0]
-		path := filepath.Join(g.inputDir, "pkg", "apis", gv.Group.String(), string(version.Version))
+		path := filepath.Join(g.basePackage, "pkg", "apis", gv.Group.String(), string(version.Version))
 
-		pkgs, err := loader.LoadRoots(path)
+		pkgs, err := loader.LoadRootsWithConfig(&packages.Config{Dir: g.inputDir}, path)
 		if err != nil {
 			return err
 		}
@@ -322,7 +325,7 @@ func (g *Generator) generateSubInterfaces(ctx *genall.GenerationContext) error {
 					return
 				}
 
-				a, err := internal.NewAPI(root, info, string(version.Version), gv.PackageName, !isNamespaced(info), &outContent)
+				a, err := internal.NewAPI(root, info, string(version.Version), gv.PackageName, !isNamespaced(info), hasStatusSubresource(info), &outContent)
 				if err != nil {
 					root.AddError(err)
 					return
@@ -384,6 +387,10 @@ func isEnabledForMethod(info *markers.TypeInfo) bool {
 func isNamespaced(info *markers.TypeInfo) bool {
 	enabled := info.Markers.Get(namespaceMarker.Name)
 	return enabled != nil
+}
+
+func hasStatusSubresource(info *markers.TypeInfo) bool {
+	return info.Markers.Get(statusSubresourceMarker.Name) != nil
 }
 
 func writeMethods(out io.Writer, byType map[string][]byte) error {

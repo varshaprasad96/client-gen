@@ -164,6 +164,15 @@ func (w *wrapped{{.Name}}) Update(ctx context.Context, {{.NameLowerFirst}} *{{.P
 	}
 	return w.delegate.Update(ctx, {{.NameLowerFirst}}, opts)
 }
+{{if .HasStatus}}
+func (w *wrapped{{.Name}}) UpdateStatus(ctx context.Context, {{.NameLowerFirst}} *{{.PkgName}}api{{.Version}}.{{.Name}}, opts metav1.UpdateOptions) (*{{.PkgName}}api{{.Version}}.{{.Name}}, error) {
+	ctx, err := w.checkCluster(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return w.delegate.UpdateStatus(ctx, {{.NameLowerFirst}}, opts)
+}
+{{end}}
 
 func (w *wrapped{{.Name}}) Delete(ctx context.Context, name string, opts metav1.DeleteOptions) error {
 	ctx, err := w.checkCluster(ctx)

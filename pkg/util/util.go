@@ -17,7 +17,10 @@ limitations under the License.
 package util
 
 import (
-	gobuild "go/build"
+	"fmt"
+	"golang.org/x/mod/modfile"
+	"io/ioutil"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -25,14 +28,14 @@ import (
 // CurrentPackage returns the go package of the current directory, or "" if it cannot
 // be derived from the GOPATH.
 // This logic is taken from k8.io/code-generator, but has a change of letting user pass the
-// directory whose pacakge is to be found.
+// directory whose package is to be found.
 func CurrentPackage(dir string) string {
-	for _, root := range gobuild.Default.SrcDirs() {
-		if pkg, ok := hasSubdir(root, dir); ok {
-			return pkg
-		}
+	gomod, err := ioutil.ReadFile(filepath.Join(dir, "go.mod"))
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
 	}
-	return ""
+	return modfile.ModulePath(gomod)
 }
 
 func hasSubdir(root, dir string) (rel string, ok bool) {
